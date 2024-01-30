@@ -11,9 +11,6 @@ import web3
 from web3.auto import w3
 
 import cryptography
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding
 
@@ -47,7 +44,7 @@ def kms_encrypt_call(credential, plaintext):
     # Encrypt your data using the plaintext key
     encrypted_data = encrypt_data_with_key(plaintext, plaintext_key)
     
-    # Delete plain text key from memory
+    # Delete plaintext_key from memory
     securely_delete_key(plaintext_key)
 
     return ciphertext_key, encrypted_data
@@ -59,7 +56,7 @@ def encrypt_data_with_key(data, key):
     padded_data = padder.update(data) + padder.finalize()
 
     # Create an AES cipher object with the key and use CBC mode for encryption
-    cipher = Cipher(algorithms.AES(key), modes.CBC(bytes([0] * 16)), backend=default_backend())
+    cipher = Cipher(algorithms.AES(key), modes.CBC(bytes([0] * 16)), backend=cryptography.hazmat.backends.default_backend())
     encryptor = cipher.encryptor()
 
     # Encrypt the padded data
@@ -70,7 +67,7 @@ def encrypt_data_with_key(data, key):
 # Utility code to decrypt data with raw data key
 def decrypt_data_with_key(ciphertext, key):
     # Create an AES cipher object with the key and use CBC mode for decryption
-    cipher = Cipher(algorithms.AES(key), modes.CBC(bytes([0] * 16)), backend=default_backend())
+    cipher = Cipher(algorithms.AES(key), modes.CBC(bytes([0] * 16)), backend=cryptography.hazmat.backends.default_backend())
     decryptor = cipher.decryptor()
 
     # Decrypt the ciphertext
@@ -162,36 +159,31 @@ def generate_wallet():
 
 # =============== EVM Transaction Signing =================
 
-def sign_transaction(credential, transaction_dict, key_input):
+def sign_transaction(credential, transaction_dict, encrypted_private_key, encrypted_data_key):
     try:
-        key_b64 = kms_decrypt_call(credential, key_input)
+        data_key_b64 = kms_decrypt_call(credential, encrypted_data_key)
+        data_key_plaintext = base64.standard_b64decode(data_key_b64).decode()
+
+        # Decrypt the private key using the decrypted data key
+        key_plaintext = decrypt_data_with_key(encrypted_private_key, data_key_plaintext)
+
+        transaction_dict["value"] = web3.Web3.toWei(transaction_dict["value"], "ether")
+        transaction_signed = w3.eth.account.sign_transaction(transaction_dict, key_plaintext)
+        
+        response_plaintext = {
+            "transaction_signed": transaction_signed.rawTransaction.hex(),
+            "transaction_hash": transaction_signed.hash.hex(),
+        }
+
     except Exception as e:
-        msg = "exception happened calling kms binary: {}".format(e)
+        msg = "Exception occurred: {}".format(e)
         print(msg)
-        response_plaintext = msg
+        response_plaintext = {"error": msg}
 
-    else:
-        key_plaintext = base64.standard_b64decode(key_b64).decode()
-
-        try:
-            transaction_dict["value"] = web3.Web3.toWei(
-                    transaction_dict["value"], "ether"
-                )
-            transaction_signed = w3.eth.account.sign_transaction(
-                    transaction_dict, key_plaintext
-                )
-            response_plaintext = {
-                    "transaction_signed": transaction_signed.rawTransaction.hex(),
-                    "transaction_hash": transaction_signed.hash.hex(),
-                }
-
-        except Exception as e:
-            msg = "exception happened signing the transaction: {}".format(e)
-            print(msg)
-            response_plaintext = msg
-
-            # delete internal reference to plain text password
-        del key_plaintext
+    finally:
+        # Delete the private key and data key from memory
+        securely_delete_key(key_plaintext)
+        securely_delete_key(data_key_plaintext)
 
     print("response_plaintext: {}".format(response_plaintext))
     return response_plaintext
@@ -225,19 +217,18 @@ def main():
         print("payload json: {}".format(payload_json))
 
         credential = payload_json["credential"]
-        transaction_dict = payload_json["transaction_payload"]
-
-        # Extract the method type from the payload
         method_type = payload_json["method_type"]
         print("method_type: {}".format(method_type))
 
         # Check the method type and invoke the appropriate function
-        if method_type == "encrypt":
-            key_input = payload_json["plaintext_data"]
-            response_plaintext = kms_encrypt_call(credential, key_input)
-        elif method_type == "decrypt":
-            key_input = payload_json["encrypted_key"]
-            response_plaintext = sign_transaction(credential, transaction_dict, key_input)
+        if method_type == "wallet_generation":
+            user_data_list = payload_json.get("user_data_list", [])
+            response_plaintext = generate_wallets(user_data_list)
+        elif method_type == "transaction_signing":
+            encrypted_private_key = payload_json.get("encrypted_private_key", "")
+            encrypted_data_key = payload_json.get("encrypted_data_key", "")
+            transaction_dict = payload_json.get("transaction_payload", {})
+            response_plaintext = sign_transaction(credential, transaction_dict, encrypted_private_key, encrypted_data_key)
         else:
             response_plaintext = {"error": "Invalid method_type"}
 
