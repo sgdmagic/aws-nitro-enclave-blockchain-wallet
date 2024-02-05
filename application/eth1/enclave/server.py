@@ -123,7 +123,7 @@ def kms_decrypt_call(credential, ciphertext):
 
 # =============== Wallet Generation =================
 # Generate wallets for incoming user metadata list 
-def generate_wallets(user_data_list):
+def generate_wallets(credential, user_data_list):
     wallets = []
 
     for user_data in user_data_list:
@@ -131,12 +131,13 @@ def generate_wallets(user_data_list):
         email = user_data["email"]
 
         # Generate a new wallet address and encrypted private key
-        wallet_address, encrypted_private_key = generate_wallet_for_user(user_data)
+        wallet_address, encrypted_data_key, encrypted_private_key = generate_wallet_for_user(credential, user_data)
 
         wallet_info = {
             "user_id": user_id,
             "email": email,
             "wallet_address": wallet_address,
+            "encrypted_data_key": encrypted_data_key,
             "encrypted_private_key": encrypted_private_key,
         }
 
@@ -145,10 +146,10 @@ def generate_wallets(user_data_list):
     return wallets
 
 # Utility function to generate wallet for a user, and return the encrypted wallet & encrypted data key
-def generate_wallet_for_user(user_data):
+def generate_wallet_for_user(credential):
     wallet_address, private_key = generate_wallet()
-    encrypted_private_key = encrypt_data_with_key(private_key, user_data["encryption_key"])
-    return wallet_address, encrypted_private_key
+    encrypted_data_key, encrypted_private_key = kms_encrypt_call(credential, private_key)
+    return wallet_address, encrypted_data_key, encrypted_private_key
 
 # Utility function to create an individual wallet using web3.py 
 def generate_wallet():
@@ -223,7 +224,7 @@ def main():
         # Check the method type and invoke the appropriate function
         if method_type == "wallet_generation":
             user_data_list = payload_json.get("user_data_list", [])
-            response_plaintext = generate_wallets(user_data_list)
+            response_plaintext = generate_wallets(credential, user_data_list)
         elif method_type == "transaction_signing":
             encrypted_private_key = payload_json.get("encrypted_private_key", "")
             encrypted_data_key = payload_json.get("encrypted_data_key", "")
