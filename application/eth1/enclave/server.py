@@ -272,13 +272,13 @@ def main():
 
         # Check the method type and invoke the appropriate function
         if method_type == "wallet_generation":
-            user_data_list = enclave_payload.get("user_data_list", [])
+            user_data_list = enclave_payload.get("user_data_list")
             response_plaintext = generate_wallets(credential, user_data_list)
         elif method_type == "transaction_signing":
-            encrypted_private_key = enclave_payload.get("encrypted_private_key", "")
-            encrypted_data_key = enclave_payload.get("encrypted_data_key", "")
-            transaction_dict = enclave_payload.get("transaction_payload", {})
-            kms_key_id = enclave_payload.get("kms_key_id", None)
+            encrypted_private_key = enclave_payload.get("encrypted_private_key")
+            encrypted_data_key = enclave_payload.get("encrypted_data_key")
+            transaction_dict = enclave_payload.get("transaction_payload")
+            kms_key_id = enclave_payload.get("kms_key_id")
             response_plaintext = sign_transaction(credential, transaction_dict, encrypted_private_key, encrypted_data_key, kms_key_id)
         else:
             response_plaintext = {"error": "Invalid method_type"}

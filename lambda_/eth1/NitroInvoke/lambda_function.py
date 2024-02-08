@@ -25,6 +25,9 @@ _logger.propagate = False
 
 client_kms = boto3.client("kms")
 
+# We can define the name of the lambda as something like /call_enclave for clarity
+# The input payload is freeform, allowing the enclave to scale for more use-cases easily
+# The enclave instances are stateless, so we can scale them up and down as needed, beind a load balancer
 def lambda_handler(event, context):
     """
     example requests
@@ -67,7 +70,7 @@ def lambda_handler(event, context):
     """
     nitro_instance_private_dns = os.getenv("NITRO_INSTANCE_PRIVATE_DNS")
 
-    if not (nitro_instance_private_dns):
+    if not nitro_instance_private_dns:
         _logger.fatal(
             "NITRO_INSTANCE_PRIVATE_DNS environment variable need to be set"
         )
