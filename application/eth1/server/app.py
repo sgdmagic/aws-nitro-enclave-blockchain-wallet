@@ -9,13 +9,6 @@ import ssl
 from http import client
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-import boto3
-
-secrets_manager_client = boto3.client(
-    service_name="secretsmanager", region_name=os.getenv("REGION", "us-east-1")
-)
-
-
 class S(BaseHTTPRequestHandler):
     def _set_response(self, http_status=200):
         self.send_response(http_status)
@@ -33,7 +26,7 @@ class S(BaseHTTPRequestHandler):
         )
         payload = json.loads(post_data.decode("utf-8"))
 
-        if not (payload.get("transaction_payload") and payload.get("secret_id")):
+        if not payload.get("transaction_payload"):
             self._set_response(404)
             self.wfile.write(
                 "transaction_payload or encrypted_key are missing".encode("utf-8")
@@ -44,16 +37,7 @@ class S(BaseHTTPRequestHandler):
         self._set_response()
         self.wfile.write(plaintext_json.encode("utf-8"))
 
-
-def get_encrypted_key(secret_id):
-    try:
-        encrypted_key = secrets_manager_client.get_secret_value(SecretId=secret_id)
-    except Exception as e:
-        raise e
-
-    return encrypted_key["SecretString"]
-
-
+# TODO: This needs modification with infra's help. So far seems like this is generic for IAM+EC2 and not KMS specific. 
 def get_aws_session_token():
     http_ec2_client = client.HTTPConnection("169.254.169.254")
     http_ec2_client.request("GET", "/latest/meta-data/iam/security-credentials/")
@@ -80,14 +64,11 @@ def get_aws_session_token():
 
 
 def call_enclave(cid, port, enclave_payload):
-    secret_id = enclave_payload["secret_id"]
-    encrypted_key = get_encrypted_key(secret_id)
 
     payload = {}
-    # Get EC2 instance metedata
+    # Get EC2 instance metadata
     payload["credential"] = get_aws_session_token()
     payload["transaction_payload"] = enclave_payload["transaction_payload"]
-    payload["encrypted_key"] = encrypted_key
 
     # Create a vsock socket object
     s = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
@@ -95,20 +76,17 @@ def call_enclave(cid, port, enclave_payload):
     # Connect to the server
     s.connect((cid, port))
 
-    # Send AWS credential to the server running in enclave
+    # Send AWS credential to the server running in the enclave
     s.send(str.encode(json.dumps(payload)))
 
-    # receive data from the server
+    # Receive data from the server
     payload_processed = s.recv(1024).decode()
     print("payload_processed: {}".format(payload_processed))
 
-    # close the connection
+    # Close the connection
     s.close()
 
     return payload_processed
-
-    # return json.dumps(payload)
-
 
 def run(server_class=HTTPServer, handler_class=S, port=443):
     logging.basicConfig(level=logging.INFO)
@@ -127,7 +105,6 @@ def run(server_class=HTTPServer, handler_class=S, port=443):
         pass
     httpd.server_close()
     logging.info("Stopping httpd...\n")
-
 
 if __name__ == "__main__":
     run()

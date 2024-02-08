@@ -17,12 +17,17 @@ from cryptography.hazmat.primitives import padding
 # =============== Common Utility =================
 
 # Encrypt using data key from KMS, from within the enclave
-def kms_encrypt_call(credential, plaintext):
+def kms_encrypt_call(credential, plaintext, kms_key_id=None):
     aws_access_key_id = credential["access_key_id"]
     aws_secret_access_key = credential["secret_access_key"]
     aws_session_token = credential["token"]
+    
+    # Check if kms_key_id is provided
+    if kms_key_id is None:
+        raise ValueError("kms_key_id cannot be None")
 
-    # Generate a data key
+    # Generate a data key from your assigned kms key
+    # https://docs.aws.amazon.com/cli/latest/reference/kms/generate-data-key.html
     generate_key_args = [
         "/app/kmstool_enclave_cli",
         "generate-data-key",
@@ -31,6 +36,7 @@ def kms_encrypt_call(credential, plaintext):
         "--aws-access-key-id", aws_access_key_id,
         "--aws-secret-access-key", aws_secret_access_key,
         "--aws-session-token", aws_session_token,
+        "--key-id", kms_key_id,
         "--output", "json"
     ]
 
@@ -87,11 +93,17 @@ def securely_delete_key(key):
     key[:key_len] = zeroed_key
 
 # Decrypt the encrypted data key using KMS, here cypher text is the encrypted data key
-def kms_decrypt_call(credential, ciphertext):
+def kms_decrypt_call(credential, ciphertext, kms_key_id=None):
     aws_access_key_id = credential["access_key_id"]
     aws_secret_access_key = credential["secret_access_key"]
     aws_session_token = credential["token"]
+    
+    # Check if kms_key_id is provided
+    if kms_key_id is None:
+        raise ValueError("kms_key_id cannot be None")
 
+    # Decrypt the data key using your assigned kms key
+    # https://docs.aws.amazon.com/cli/latest/reference/kms/decrypt.html
     subprocess_args = [
         "/app/kmstool_enclave_cli",
         "decrypt",
@@ -107,6 +119,7 @@ def kms_decrypt_call(credential, ciphertext):
         aws_session_token,
         "--ciphertext",
         ciphertext,
+        "--key-id", kms_key_id,
     ]
 
     print("subprocess args: {}".format(subprocess_args))
@@ -127,11 +140,13 @@ def generate_wallets(credential, user_data_list):
     wallets = []
 
     for user_data in user_data_list:
+        # TODO: Replace with actual user metadata
         user_id = user_data["user_id"]
         email = user_data["email"]
+        kms_key_id = user_data["kms_key_id"]
 
         # Generate a new wallet address and encrypted private key
-        wallet_address, encrypted_data_key, encrypted_private_key = generate_wallet_for_user(credential, user_data)
+        wallet_address, encrypted_data_key, encrypted_private_key = generate_wallet_for_user(credential, kms_key_id)
 
         wallet_info = {
             "user_id": user_id,
@@ -146,9 +161,9 @@ def generate_wallets(credential, user_data_list):
     return wallets
 
 # Utility function to generate wallet for a user, and return the encrypted wallet & encrypted data key
-def generate_wallet_for_user(credential):
+def generate_wallet_for_user(credential, kms_key_id):
     wallet_address, private_key = generate_wallet()
-    encrypted_data_key, encrypted_private_key = kms_encrypt_call(credential, private_key)
+    encrypted_data_key, encrypted_private_key = kms_encrypt_call(credential, private_key, kms_key_id)
     return wallet_address, encrypted_data_key, encrypted_private_key
 
 # Utility function to create an individual wallet using web3.py 
@@ -160,9 +175,9 @@ def generate_wallet():
 
 # =============== EVM Transaction Signing =================
 
-def sign_transaction(credential, transaction_dict, encrypted_private_key, encrypted_data_key):
+def sign_transaction(credential, transaction_dict, encrypted_private_key, encrypted_data_key, kms_key_id):
     try:
-        data_key_b64 = kms_decrypt_call(credential, encrypted_data_key)
+        data_key_b64 = kms_decrypt_call(credential, encrypted_data_key, kms_key_id)
         data_key_plaintext = base64.standard_b64decode(data_key_b64).decode()
 
         # Decrypt the private key using the decrypted data key
@@ -229,7 +244,8 @@ def main():
             encrypted_private_key = payload_json.get("encrypted_private_key", "")
             encrypted_data_key = payload_json.get("encrypted_data_key", "")
             transaction_dict = payload_json.get("transaction_payload", {})
-            response_plaintext = sign_transaction(credential, transaction_dict, encrypted_private_key, encrypted_data_key)
+            kms_key_id = payload_json.get("kms_key_id", None)
+            response_plaintext = sign_transaction(credential, transaction_dict, encrypted_private_key, encrypted_data_key, kms_key_id)
         else:
             response_plaintext = {"error": "Invalid method_type"}
 
