@@ -29,7 +29,7 @@ class S(BaseHTTPRequestHandler):
         if not payload.get("transaction_payload"):
             self._set_response(404)
             self.wfile.write(
-                "transaction_payload or encrypted_key are missing".encode("utf-8")
+                "transaction_payload is missing".encode("utf-8")
             )
 
         plaintext_json = call_enclave(16, 5000, payload)
