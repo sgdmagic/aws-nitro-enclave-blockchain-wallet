@@ -24,123 +24,85 @@ _logger.addHandler(handler)
 _logger.propagate = False
 
 client_kms = boto3.client("kms")
-client_secrets_manager = boto3.client("secretsmanager")
-
 
 def lambda_handler(event, context):
     """
     example requests
+    
+    # For wallet_generation
+    
     {
-      "operation": "set_key",
-      "eth_key": "123"
+    
+    "enclave_payload": {
+        "method_type": "wallet_generation",
+        "wallets": [
+            {"user_id": "user_id_1", "email": "email1@example.com", "kms_id": "KMSID1"},
+            {"user_id": "user_id_2", "email": "email2@example.com", "kms_id": "KMSID2"},
+            {"user_id": "user_id_3", "email": "email3@example.com", "kms_id": "KMSID3"}
+        ]
+        }
     }
+    
+    # For sign_transaction
 
     {
-      "operation": "get_key"
-    }
-
-    {
-      "operation": "sign_transaction",
-      "transaction_payload": {
-        "value": 0.01,
-        "to": "0xa5D3241A1591061F2a4bB69CA0215F66520E67cf",
-        "nonce": 0,
-        "type": 2,
-        "chainId": 4,
-        "gas": 100000,
-        "maxFeePerGas": 100000000000,
-        "maxPriorityFeePerGas": 3000000000
+        "enclave_payload": {
+            "method_type": "sign_transaction",
+            "kms_id": "KMSID1",
+            "transaction_payload": {
+                "value": 0.01,
+                "to": "0xa5D3241A1591061F2a4bB69CA0215F66520E67cf",
+                "nonce": 0,
+                "type": 2,
+                "chainId": 4,
+                "gas": 100000,
+                "maxFeePerGas": 100000000000,
+                "maxPriorityFeePerGas": 3000000000
+            }
         }
     }
 
     """
     nitro_instance_private_dns = os.getenv("NITRO_INSTANCE_PRIVATE_DNS")
-    secret_id = os.getenv("SECRET_ARN")
-    key_id = os.getenv("KEY_ARN")
 
-    if not (nitro_instance_private_dns and secret_id and key_id):
+    if not (nitro_instance_private_dns):
         _logger.fatal(
-            "NITRO_INSTANCE_PRIVATE_DNS, SECRET_ARN and KEY_ARN environment variables need to be set"
+            "NITRO_INSTANCE_PRIVATE_DNS environment variable need to be set"
+        )
+        
+    # wallet_generation lambda
+    enclave_payload = event.get("enclave_payload")
+
+    if not enclave_payload:
+        raise Exception(
+            "enclave_payload is a required input for enclave operations"
         )
 
-    operation = event.get("operation")
-    if not operation:
-        _logger.fatal("request needs to define operation")
+    https_nitro_client = client.HTTPSConnection(
+        "{}:{}".format(nitro_instance_private_dns, 443), context=ssl_context
+    )
 
-    if operation == "set_key":
-        key_plaintext = event.get("eth_key")
-
-        try:
-            response = client_kms.encrypt(
-                KeyId=key_id, Plaintext=key_plaintext.encode()
+    try:
+        https_nitro_client.request(
+            "POST",
+            "/",
+            body=json.dumps(
+                {"enclave_payload": enclave_payload}
+            ),
+        )
+        response = https_nitro_client.getresponse()
+    except Exception as e:
+        raise Exception(
+            "exception happened sending decryption request to Nitro Enclave: {}".format(
+                e
             )
-        except Exception as e:
-            raise Exception(
-                "exception happened sending decryption request to KMS: {}".format(e)
-            )
-
-        _logger.debug("response: {}".format(response))
-        response_b64 = base64.standard_b64encode(response["CiphertextBlob"]).decode()
-
-        try:
-            response = client_secrets_manager.update_secret(
-                SecretId=secret_id,
-                # rely on the AWS managed key for std. storage
-                SecretString=response_b64,
-            )
-        except Exception as e:
-            raise Exception("exception happened updating secret: {}".format(e))
-
-        return response
-
-    elif operation == "get_key":
-        try:
-            response = client_secrets_manager.get_secret_value(SecretId=secret_id)
-        except Exception as e:
-            raise Exception(
-                "exception happened reading secret from secrets manager: {}".format(e)
-            )
-
-        return response["SecretString"]
-
-    # sign_transaction
-
-    elif operation == "sign_transaction":
-        transaction_payload = event.get("transaction_payload")
-
-        if not transaction_payload:
-            raise Exception(
-                "sign_transaction requires transaction_payload and secret_id optionally"
-            )
-
-        https_nitro_client = client.HTTPSConnection(
-            "{}:{}".format(nitro_instance_private_dns, 443), context=ssl_context
         )
 
-        try:
-            https_nitro_client.request(
-                "POST",
-                "/",
-                body=json.dumps(
-                    {"transaction_payload": transaction_payload, "secret_id": secret_id}
-                ),
-            )
-            response = https_nitro_client.getresponse()
-        except Exception as e:
-            raise Exception(
-                "exception happened sending decryption request to Nitro Enclave: {}".format(
-                    e
-                )
-            )
+    _logger.debug("response: {} {}".format(response.status, response.reason))
 
-        _logger.debug("response: {} {}".format(response.status, response.reason))
+    response_raw = response.read()
 
-        response_raw = response.read()
+    _logger.debug("response data: {}".format(response_raw))
+    response_parsed = json.loads(response_raw)
 
-        _logger.debug("response data: {}".format(response_raw))
-        response_parsed = json.loads(response_raw)
-
-        return response_parsed
-
-    else:
-        _logger.fatal("operation: {} not supported right now".format(operation))
+    return response_parsed

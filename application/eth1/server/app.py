@@ -26,10 +26,10 @@ class S(BaseHTTPRequestHandler):
         )
         payload = json.loads(post_data.decode("utf-8"))
 
-        if not payload.get("transaction_payload"):
+        if not payload.get("enclave_payload"):
             self._set_response(404)
             self.wfile.write(
-                "transaction_payload is missing".encode("utf-8")
+                "enclave_payload is missing".encode("utf-8")
             )
 
         plaintext_json = call_enclave(16, 5000, payload)
@@ -68,7 +68,7 @@ def call_enclave(cid, port, enclave_payload):
     payload = {}
     # Get EC2 instance metadata
     payload["credential"] = get_aws_session_token()
-    payload["transaction_payload"] = enclave_payload["transaction_payload"]
+    payload["enclave_payload"] = enclave_payload["enclave_payload"]
 
     # Create a vsock socket object
     s = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
