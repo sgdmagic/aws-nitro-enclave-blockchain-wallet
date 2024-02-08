@@ -144,9 +144,12 @@ def generate_wallets(credential, user_data_list):
         user_id = user_data["user_id"]
         email = user_data["email"]
         kms_key_id = user_data["kms_key_id"]
+        
+        wallet_address, encrypted_data_key, encrypted_private_key = None, None, None
 
-        # Generate a new wallet address and encrypted private key
-        wallet_address, encrypted_data_key, encrypted_private_key = generate_wallet_for_user(credential, kms_key_id)
+        # Generate a new wallet address and encrypted private key, if kms_id is available
+        if kms_key_id:
+            wallet_address, encrypted_data_key, encrypted_private_key = generate_wallet_for_user(credential, kms_key_id)
 
         wallet_info = {
             "user_id": user_id,
@@ -206,6 +209,34 @@ def sign_transaction(credential, transaction_dict, encrypted_private_key, encryp
 
 # =============== End of Transaction Signing =================
 
+# ================ Valiation =================
+
+def validate_enclave_payload(enclave_payload):
+    method_type = enclave_payload.get("method_type")
+    
+    if method_type is None:
+        raise ValueError("Method type not found in the enclave payload.")
+    
+    if method_type == "wallet_generation":
+        if enclave_payload.get("user_data_list") is None:
+            raise ValueError(f"User data list not found in the enclave payload for method type {method_type}.")
+    
+    if method_type == "wallet_generation":
+        if not enclave_payload.get("user_data_list"):
+            raise ValueError(f"User data list not found in the enclave payload for method type {method_type}.")
+    
+    if method_type == "transaction_signing":    
+        if not enclave_payload.get("encrypted_private_key"):
+            raise ValueError(f"Encrypted private key not found in the enclave payload for method type {method_type}.")
+        elif not enclave_payload.get("encrypted_data_key"):
+            raise ValueError(f"Encrypted data key not found in the enclave payload for method type {method_type}.")
+        elif not enclave_payload.get("transaction_dict"):
+            raise ValueError(f"Transaction payload dictionary not found in the enclave payload for method type {method_type}.")
+        elif not enclave_payload.get("kms_key_id"):
+            raise ValueError(f"KMS key id dictionary not found in the enclave payload for method type {method_type}.")
+    
+# ================ End of Validation =================
+
 def main():
     print("Starting server...")
 
@@ -230,21 +261,24 @@ def main():
         # Get AWS credential sent from the parent instance
         payload = c.recv(4096)
         payload_json = json.loads(payload.decode())
-        print("payload json: {}".format(payload_json))
-
+        
         credential = payload_json["credential"]
-        method_type = payload_json["method_type"]
-        print("method_type: {}".format(method_type))
+        enclave_payload = payload_json["enclave_payload"]
+        method_type = enclave_payload.get("method_type")
+        
+        print("enclave_payload: {}".format(enclave_payload))
+        
+        validate_enclave_payload(enclave_payload)
 
         # Check the method type and invoke the appropriate function
         if method_type == "wallet_generation":
-            user_data_list = payload_json.get("user_data_list", [])
+            user_data_list = enclave_payload.get("user_data_list", [])
             response_plaintext = generate_wallets(credential, user_data_list)
         elif method_type == "transaction_signing":
-            encrypted_private_key = payload_json.get("encrypted_private_key", "")
-            encrypted_data_key = payload_json.get("encrypted_data_key", "")
-            transaction_dict = payload_json.get("transaction_payload", {})
-            kms_key_id = payload_json.get("kms_key_id", None)
+            encrypted_private_key = enclave_payload.get("encrypted_private_key", "")
+            encrypted_data_key = enclave_payload.get("encrypted_data_key", "")
+            transaction_dict = enclave_payload.get("transaction_payload", {})
+            kms_key_id = enclave_payload.get("kms_key_id", None)
             response_plaintext = sign_transaction(credential, transaction_dict, encrypted_private_key, encrypted_data_key, kms_key_id)
         else:
             response_plaintext = {"error": "Invalid method_type"}

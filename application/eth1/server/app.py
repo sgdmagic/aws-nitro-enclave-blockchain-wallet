@@ -63,12 +63,12 @@ def get_aws_session_token():
     return credential
 
 
-def call_enclave(cid, port, enclave_payload):
+def call_enclave(cid, port, incoming_payload):
 
     payload = {}
     # Get EC2 instance metadata
     payload["credential"] = get_aws_session_token()
-    payload["enclave_payload"] = enclave_payload["enclave_payload"]
+    payload["enclave_payload"] = incoming_payload["enclave_payload"]
 
     # Create a vsock socket object
     s = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)

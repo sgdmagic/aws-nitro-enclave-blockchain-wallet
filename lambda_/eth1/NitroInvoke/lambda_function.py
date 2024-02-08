@@ -35,7 +35,7 @@ def lambda_handler(event, context):
     
     "enclave_payload": {
         "method_type": "wallet_generation",
-        "wallets": [
+        "user_data_list": [
             {"user_id": "user_id_1", "email": "email1@example.com", "kms_id": "KMSID1"},
             {"user_id": "user_id_2", "email": "email2@example.com", "kms_id": "KMSID2"},
             {"user_id": "user_id_3", "email": "email3@example.com", "kms_id": "KMSID3"}
@@ -48,6 +48,8 @@ def lambda_handler(event, context):
     {
         "enclave_payload": {
             "method_type": "sign_transaction",
+            "encrypted_private_key": "PK123",
+            ""encrypted_data_key": "0xblahblah",
             "kms_id": "KMSID1",
             "transaction_payload": {
                 "value": 0.01,
